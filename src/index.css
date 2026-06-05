@@ -1,0 +1,112 @@
+/* ─── Design Tokens ──────────────────────────────────────────── */
+
+:root {
+  /* Core palette */
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --border: #e2e8f0;
+  --border-subtle: #f1f5f9;
+
+  /* Text */
+  --text-h: #0f172a;
+  --text: #475569;
+  --text-muted: #94a3b8;
+
+  /* Brand — sky/teal health palette */
+  --accent: #0ea5e9;
+  --accent-soft: #e0f2fe;
+  --accent-mid: #0284c7;
+  --accent-glow: rgba(14, 165, 233, 0.15);
+
+  /* Health colors */
+  --green: #10b981;
+  --green-soft: #d1fae5;
+  --red: #ef4444;
+  --red-soft: #fee2e2;
+  --amber: #f59e0b;
+  --amber-soft: #fef3c7;
+  --purple: #8b5cf6;
+  --purple-soft: #ede9fe;
+
+  /* Shadows */
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.10);
+  --shadow-glow: 0 4px 20px rgba(14, 165, 233, 0.2);
+
+  /* Spacing */
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --radius-full: 9999px;
+
+  /* Type */
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --mono: ui-monospace, 'SF Mono', Consolas, monospace;
+
+  font: 16px/1.6 var(--sans);
+  color-scheme: light;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ─── Dark Mode ─────────────────────────────────────────────── */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c1222;
+    --surface: #111827;
+    --surface-2: #1e293b;
+    --border: #1e293b;
+    --border-subtle: #1e293b;
+    --text-h: #f1f5f9;
+    --text: #94a3b8;
+    --text-muted: #475569;
+    --accent-soft: #0c2340;
+    --green-soft: #064e3b;
+    --red-soft: #450a0a;
+    --amber-soft: #451a03;
+    --purple-soft: #2e1065;
+    --shadow-xs: 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-sm: 0 2px 8px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.4);
+    --shadow-lg: 0 8px 32px rgba(0,0,0,0.5);
+    --shadow-glow: 0 4px 20px rgba(14, 165, 233, 0.25);
+  }
+}
+
+/* ─── Reset ─────────────────────────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body { min-height: 100svh; background: var(--bg); }
+
+#root { min-height: 100svh; }
+
+/* ─── Inputs ─────────────────────────────────────────────────── */
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+input[type="number"] { -moz-appearance: textfield; }
+
+button { font-family: inherit; cursor: pointer; border: none; background: none; }
+input, textarea { font-family: inherit; }
+
+/* ─── Scrollbar ──────────────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+/* ─── Selection ──────────────────────────────────────────────── */
+
+::selection { background: var(--accent-soft); color: var(--accent-mid); }
