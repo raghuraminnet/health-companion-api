@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Line } from 'react-chartjs-2'
 import {
   Chart as ChartJS,
@@ -29,6 +29,7 @@ import {
   getBpEntries, saveBpEntry, deleteBpEntry,
   getWeightEntries, saveWeightEntry, deleteWeightEntry,
 } from './utils/storage'
+import OnboardingModal, { markOnboardingComplete, hasOnboarded } from './components/OnboardingModal'
 import {
   getBpCategory, calcHeartScore, getScoreLabel,
   BP_CONTEXT_TAGS, groupContextTags,
@@ -659,6 +660,23 @@ function App() {
   const [showWeightModal, setShowWeightModal] = useState(false)
   const [bpEntries, setBpEntries] = useState(() => getBpEntries())
   const [weightEntries, setWeightEntries] = useState(() => getWeightEntries())
+  const [showOnboarding, setShowOnboarding] = useState(() => !hasOnboarded())
+
+  const handleOnboardingComplete = (bpData) => {
+    if (bpData?.systolic && bpData?.diastolic) {
+      const entry = saveBpEntry({
+        systolic: parseInt(bpData.systolic),
+        diastolic: parseInt(bpData.diastolic),
+        pulse: bpData.pulse ? parseInt(bpData.pulse) : null,
+        context: bpData.context || [],
+        notes: '',
+        medicationTaken: bpData.medicationTaken || false,
+      })
+      setBpEntries(prev => [entry, ...prev])
+    }
+    markOnboardingComplete()
+    setShowOnboarding(false)
+  }
 
   const handleSaveBp = (data) => {
     const entry = saveBpEntry(data)
@@ -744,6 +762,11 @@ function App() {
           onClose={() => setShowWeightModal(false)}
           onSave={handleSaveWeight}
         />
+      )}
+
+      {/* Onboarding */}
+      {showOnboarding && (
+        <OnboardingModal onComplete={handleOnboardingComplete} />
       )}
     </div>
   )
