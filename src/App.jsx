@@ -31,6 +31,7 @@ import {
   isAuthenticated, logout,
 } from './utils/storage'
 import AuthScreen from './components/AuthScreen'
+import PasswordResetScreen from './components/PasswordResetScreen'
 import OnboardingModal, { markOnboardingComplete, hasOnboarded } from './components/OnboardingModal'
 import {
   getBpCategory, calcHeartScore, getScoreLabel,
@@ -665,9 +666,14 @@ function App() {
   const [showOnboarding, setShowOnboarding] = useState(() => !hasOnboarded())
   const [loading, setLoading] = useState(true)
   const [isAuthed, setIsAuthed] = useState(() => isAuthenticated())
+  const [needsPasswordReset, setNeedsPasswordReset] = useState(false)
 
   useEffect(() => {
-    loadData()
+    if (isAuthenticated()) {
+      loadData()
+    } else {
+      setLoading(false)
+    }
   }, [])
 
   async function loadData() {
@@ -685,6 +691,15 @@ function App() {
 
   const handleAuth = () => {
     setIsAuthed(true)
+    loadData()
+  }
+
+  const handlePasswordResetRequired = () => {
+    setNeedsPasswordReset(true)
+  }
+
+  const handlePasswordResetComplete = () => {
+    setNeedsPasswordReset(false)
     loadData()
   }
 
@@ -730,7 +745,11 @@ function App() {
   }
 
   if (!isAuthed) {
-    return <AuthScreen onAuth={handleAuth} />
+    return <AuthScreen onAuth={handleAuth} onPasswordResetRequired={handlePasswordResetRequired} />
+  }
+
+  if (needsPasswordReset) {
+    return <PasswordResetScreen onComplete={handlePasswordResetComplete} />
   }
 
   if (loading) {

@@ -1,4 +1,3 @@
-import { format, parseISO } from 'date-fns';
 import * as api from './api.js';
 
 const STORAGE_KEYS = {
@@ -30,10 +29,50 @@ export function setStoredEmail(email) {
   }
 }
 
+// ─── Auth ──────────────────────────────────────────────────────
+export async function register({ name, email, password, gender, yearOfBirth, mobile }) {
+  const result = await api.register({ name, email, password, gender, yearOfBirth, mobile });
+  setStoredEmail(email);
+  return result;
+}
+
+export async function login(email, password) {
+  const result = await api.login(email, password);
+  setStoredEmail(email);
+  return result;
+}
+
+export async function forgotPassword(email) {
+  return api.forgotPassword(email);
+}
+
+export async function changePassword(currentPassword, newPassword) {
+  return api.changePassword(currentPassword, newPassword);
+}
+
+export async function resetPassword(newPassword) {
+  return api.resetPassword(newPassword);
+}
+
+export async function logout() {
+  await api.logout();
+}
+
+export async function getMe() {
+  return api.getMe();
+}
+
+export async function updateProfile(data) {
+  return api.updateProfile(data);
+}
+
+export function isAuthenticated() {
+  return isLoggedIn();
+}
+
 // ─── BP Entries ───────────────────────────────────────────────
 export function getBpEntries() {
   if (isLoggedIn()) {
-    // Return promise for async usage
     return api.getBpEntries().catch(err => {
       if (err.message === 'UNAUTHORIZED') return [];
       console.error('API error, falling back to localStorage:', err);
@@ -77,7 +116,6 @@ export function saveBpEntry({ systolic, diastolic, pulse, context, notes, medica
       return saved;
     }).catch(err => {
       console.error('API error, saving to localStorage:', err);
-      // Fall back to localStorage
       const entries = getLocalBpEntries();
       entries.unshift(entry);
       localStorage.setItem(STORAGE_KEYS.BP_ENTRIES, JSON.stringify(entries));
@@ -85,7 +123,6 @@ export function saveBpEntry({ systolic, diastolic, pulse, context, notes, medica
     });
   }
   
-  // localStorage fallback
   const entries = getLocalBpEntries();
   entries.unshift(entry);
   localStorage.setItem(STORAGE_KEYS.BP_ENTRIES, JSON.stringify(entries));
@@ -264,28 +301,7 @@ export function saveSettings(settings) {
   return Promise.resolve();
 }
 
-// ─── Auth ──────────────────────────────────────────────────────
-export async function register(name, email) {
-  const result = await api.register(name, email);
-  setStoredEmail(email);
-  return result;
-}
-
-export async function login(email) {
-  const result = await api.login(email);
-  setStoredEmail(email);
-  return result;
-}
-
-export async function logout() {
-  await api.logout();
-  setStoredEmail(null);
-}
-
-export async function getMe() {
-  return api.getMe();
-}
-
-export function isAuthenticated() {
-  return isLoggedIn();
+// ─── Audit ─────────────────────────────────────────────────────
+export async function getAuditLogs(params) {
+  return api.getAuditLogs(params);
 }
