@@ -990,3 +990,42 @@
   .bp-divider { font-size: 24px; }
   .score-value { font-size: 60px; }
 }
+
+/* ─── Loading ────────────────────────────────────────────────── */
+.app.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.loading-spinner {
+  text-align: center;
+  color: #667eea;
+}
+
+.loading-spinner .pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.loading-spinner p {
+  margin-top: 12px;
+  color: #666;
+  font-size: 14px;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.95); }
+}
+
+/* ─── Logout Button ──────────────────────────────────────────── */
+.logout-btn {
+  margin-left: 8px !important;
+  opacity: 0.6;
+}
+
+.logout-btn:hover {
+  opacity: 1;
+  color: #ef4444;
+}

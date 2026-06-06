@@ -23,12 +23,14 @@ ChartJS.register(
 import { format, subDays, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay } from 'date-fns'
 import {
   Activity, Scale, Heart, Calendar, TrendingUp, ChevronRight,
-  Plus, X, Trash2, AlertCircle, CheckCircle, Clock, Droplets,
+  Plus, X, Trash2, AlertCircle, CheckCircle, Clock, Droplets, LogOut,
 } from 'lucide-react'
 import {
   getBpEntries, saveBpEntry, deleteBpEntry,
   getWeightEntries, saveWeightEntry, deleteWeightEntry,
+  isAuthenticated, logout,
 } from './utils/storage'
+import AuthScreen from './components/AuthScreen'
 import OnboardingModal, { markOnboardingComplete, hasOnboarded } from './components/OnboardingModal'
 import {
   getBpCategory, calcHeartScore, getScoreLabel,
@@ -658,13 +660,37 @@ function App() {
   const [tab, setTab] = useState('dashboard')
   const [showBpModal, setShowBpModal] = useState(false)
   const [showWeightModal, setShowWeightModal] = useState(false)
-  const [bpEntries, setBpEntries] = useState(() => getBpEntries())
-  const [weightEntries, setWeightEntries] = useState(() => getWeightEntries())
+  const [bpEntries, setBpEntries] = useState([])
+  const [weightEntries, setWeightEntries] = useState([])
   const [showOnboarding, setShowOnboarding] = useState(() => !hasOnboarded())
+  const [loading, setLoading] = useState(true)
+  const [isAuthed, setIsAuthed] = useState(() => isAuthenticated())
 
-  const handleOnboardingComplete = (bpData) => {
+  useEffect(() => {
+    loadData()
+  }, [])
+
+  async function loadData() {
+    setLoading(true)
+    try {
+      const [bp, weight] = await Promise.all([getBpEntries(), getWeightEntries()])
+      setBpEntries(bp)
+      setWeightEntries(weight)
+    } catch (err) {
+      console.error('Failed to load data:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleAuth = () => {
+    setIsAuthed(true)
+    loadData()
+  }
+
+  const handleOnboardingComplete = async (bpData) => {
     if (bpData?.systolic && bpData?.diastolic) {
-      const entry = saveBpEntry({
+      const entry = await saveBpEntry({
         systolic: parseInt(bpData.systolic),
         diastolic: parseInt(bpData.diastolic),
         pulse: bpData.pulse ? parseInt(bpData.pulse) : null,
@@ -678,24 +704,44 @@ function App() {
     setShowOnboarding(false)
   }
 
-  const handleSaveBp = (data) => {
-    const entry = saveBpEntry(data)
+  const handleSaveBp = async (data) => {
+    const entry = await saveBpEntry(data)
     setBpEntries(prev => [entry, ...prev])
   }
 
-  const handleDeleteBp = (id) => {
-    deleteBpEntry(id)
+  const handleDeleteBp = async (id) => {
+    await deleteBpEntry(id)
     setBpEntries(prev => prev.filter(e => e.id !== id))
   }
 
-  const handleSaveWeight = (data) => {
-    const entry = saveWeightEntry(data)
+  const handleSaveWeight = async (data) => {
+    const entry = await saveWeightEntry(data)
     setWeightEntries(prev => [entry, ...prev])
   }
 
-  const handleDeleteWeight = (id) => {
-    deleteWeightEntry(id)
+  const handleDeleteWeight = async (id) => {
+    await deleteWeightEntry(id)
     setWeightEntries(prev => prev.filter(e => e.id !== id))
+  }
+
+  const handleLogout = async () => {
+    await logout()
+    setIsAuthed(false)
+  }
+
+  if (!isAuthed) {
+    return <AuthScreen onAuth={handleAuth} />
+  }
+
+  if (loading) {
+    return (
+      <div className="app loading">
+        <div className="loading-spinner">
+          <Heart size={32} className="pulse" />
+          <p>Loading your data...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -719,6 +765,9 @@ function App() {
               {t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
           ))}
+          <button className="tab-btn logout-btn" onClick={handleLogout} title="Logout">
+            <LogOut size={15} />
+          </button>
         </nav>
       </header>
 
