@@ -109,7 +109,6 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(400).json({ error: 'Invalid year of birth' });
     }
     
-    // Check if email exists
     const existing = await client.query('SELECT id FROM users WHERE email = $1', [email]);
     if (existing.rows.length > 0) {
       await client.query('ROLLBACK');
@@ -125,6 +124,19 @@ app.post('/api/auth/register', async (req, res) => {
       [name, email, passwordHash, gender, yearOfBirth, mobile || null]
     );
     const user = userResult.rows[0];
+    
+    // Create default preferences (all trackers enabled except pregnancy)
+    await client.query(
+      `INSERT INTO user_preferences (user_id, enable_blood_pressure, enable_mood, enable_water, enable_steps, enable_pregnancy, enable_weight)
+       VALUES ($1, TRUE, TRUE, TRUE, TRUE, FALSE, TRUE)`,
+      [user.id]
+    );
+    
+    // Create default settings
+    await client.query(
+      `INSERT INTO user_settings (user_id, water_goal, steps_goal) VALUES ($1, 2500, 10000)`,
+      [user.id]
+    );
     
     // Create session token
     const token = crypto.randomBytes(32).toString('hex');
@@ -183,7 +195,6 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
     
-    // Create session token
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     await query(
@@ -222,7 +233,6 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     );
     
     if (result.rows.length === 0) {
-      // Don't reveal if email exists
       return res.json({ message: 'If the email exists, a temporary password has been sent' });
     }
     
@@ -237,8 +247,6 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     
     await logAudit(user.id, 'PASSWORD_RESET_INITIATED', 'user', user.id, { email }, req);
     
-    // In production, send email with tempPassword
-    // For now, we'll return the temp password (for testing)
     console.log(`[DEV] Temporary password for ${email}: ${tempPassword}`);
     
     res.json({ 
@@ -251,7 +259,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
   }
 });
 
-// ─── Change Password (when logged in) ─────────────────────────
+// ─── Change Password ───────────────────────────────────────────
 app.post('/api/auth/change-password', authMiddleware, checkPasswordReset, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -264,7 +272,6 @@ app.post('/api/auth/change-password', authMiddleware, checkPasswordReset, async 
       return res.status(400).json({ error: 'New password must be at least 8 characters' });
     }
     
-    // Get current password hash
     const userResult = await query('SELECT password_hash FROM users WHERE id = $1', [req.userId]);
     if (userResult.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
@@ -283,7 +290,6 @@ app.post('/api/auth/change-password', authMiddleware, checkPasswordReset, async 
     
     await logAudit(req.userId, 'PASSWORD_CHANGED', 'user', req.userId, {}, req);
     
-    // Invalidate all other sessions
     await query('DELETE FROM sessions WHERE user_id = $1 AND expires_at > NOW()', [req.userId]);
     
     res.json({ success: true, message: 'Password changed successfully' });
@@ -371,6 +377,101 @@ app.put('/api/auth/profile', authMiddleware, checkPasswordReset, async (req, res
   }
 });
 
+// ─── User Preferences ─────────────────────────────────────────
+app.get('/api/preferences', authMiddleware, checkPasswordReset, async (req, res) => {
+  try {
+    const result = await query(
+      'SELECT * FROM user_preferences WHERE user_id = $1',
+      [req.userId]
+    );
+    if (result.rows.length === 0) {
+      // Create default preferences
+      const newPrefs = await query(
+        `INSERT INTO user_preferences (user_id, enable_blood_pressure, enable_mood, enable_water, enable_steps, enable_pregnancy, enable_weight)
+         VALUES ($1, TRUE, TRUE, TRUE, TRUE, FALSE, TRUE) RETURNING *`,
+        [req.userId]
+      );
+      return res.json(newPrefs.rows[0]);
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch preferences' });
+  }
+});
+
+app.put('/api/preferences', authMiddleware, checkPasswordReset, async (req, res) => {
+  try {
+    const { 
+      enable_blood_pressure, enable_mood, enable_water, enable_steps, 
+      enable_pregnancy, enable_weight, theme 
+    } = req.body;
+    
+    await query(
+      `INSERT INTO user_preferences (user_id, enable_blood_pressure, enable_mood, enable_water, enable_steps, enable_pregnancy, enable_weight, theme)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (user_id) DO UPDATE SET
+       enable_blood_pressure = COALESCE($2, enable_blood_pressure),
+       enable_mood = COALESCE($3, enable_mood),
+       enable_water = COALESCE($4, enable_water),
+       enable_steps = COALESCE($5, enable_steps),
+       enable_pregnancy = COALESCE($6, enable_pregnancy),
+       enable_weight = COALESCE($7, enable_weight),
+       theme = COALESCE($8, theme),
+       updated_at = CURRENT_TIMESTAMP`,
+      [req.userId, enable_blood_pressure, enable_mood, enable_water, enable_steps, enable_pregnancy, enable_weight, theme]
+    );
+    
+    await logAudit(req.userId, 'PREFERENCES_UPDATED', 'user_preferences', req.userId, req.body, req);
+    
+    const result = await query('SELECT * FROM user_preferences WHERE user_id = $1', [req.userId]);
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update preferences' });
+  }
+});
+
+// ─── User Settings ─────────────────────────────────────────────
+app.get('/api/settings', authMiddleware, checkPasswordReset, async (req, res) => {
+  try {
+    const result = await query(
+      'SELECT * FROM user_settings WHERE user_id = $1',
+      [req.userId]
+    );
+    if (result.rows.length === 0) {
+      return res.json({ water_goal: 2500, steps_goal: 10000, weight_unit: 'kg', bp_unit: 'mmHg', theme: 'dark' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch settings' });
+  }
+});
+
+app.put('/api/settings', authMiddleware, checkPasswordReset, async (req, res) => {
+  try {
+    const { water_goal, steps_goal, weight_unit, bp_unit, theme } = req.body;
+    
+    await query(
+      `INSERT INTO user_settings (user_id, water_goal, steps_goal, weight_unit, bp_unit, theme)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (user_id) DO UPDATE SET
+       water_goal = COALESCE($2, water_goal),
+       steps_goal = COALESCE($3, steps_goal),
+       weight_unit = COALESCE($4, weight_unit),
+       bp_unit = COALESCE($5, bp_unit),
+       theme = COALESCE($6, theme),
+       updated_at = CURRENT_TIMESTAMP`,
+      [req.userId, water_goal, steps_goal, weight_unit, bp_unit, theme]
+    );
+    
+    await logAudit(req.userId, 'SETTINGS_UPDATED', 'user_settings', req.userId, req.body, req);
+    
+    const result = await query('SELECT * FROM user_settings WHERE user_id = $1', [req.userId]);
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save settings' });
+  }
+});
+
 // ─── Audit Logs ───────────────────────────────────────────────
 app.get('/api/audit', authMiddleware, checkPasswordReset, async (req, res) => {
   try {
@@ -394,13 +495,15 @@ app.get('/api/audit', authMiddleware, checkPasswordReset, async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════
 // ─── BP Entries ───────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
 app.get('/api/bp', authMiddleware, checkPasswordReset, async (req, res) => {
   try {
+    const { limit = 100, offset = 0 } = req.query;
     const result = await query(
-      `SELECT id, systolic, diastolic, pulse, context, notes, medication_taken, recorded_at, created_at
-       FROM bp_entries WHERE user_id = $1 ORDER BY recorded_at DESC LIMIT 100`,
-      [req.userId]
+      `SELECT * FROM bp_entries WHERE user_id = $1 ORDER BY recorded_at DESC LIMIT $2 OFFSET $3`,
+      [req.userId, parseInt(limit), parseInt(offset)]
     );
     res.json(result.rows);
   } catch (err) {
@@ -411,17 +514,17 @@ app.get('/api/bp', authMiddleware, checkPasswordReset, async (req, res) => {
 
 app.post('/api/bp', authMiddleware, checkPasswordReset, async (req, res) => {
   try {
-    const { systolic, diastolic, pulse, context, notes, medicationTaken, recordedAt } = req.body;
+    const { systolic, diastolic, pulse, session, context, notes, medicationTaken, recordedAt } = req.body;
     
     if (!systolic || !diastolic) {
       return res.status(400).json({ error: 'Systolic and diastolic are required' });
     }
     
     const result = await query(
-      `INSERT INTO bp_entries (user_id, systolic, diastolic, pulse, context, notes, medication_taken, recorded_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, systolic, diastolic, pulse, context, notes, medication_taken, recorded_at, created_at`,
-      [req.userId, systolic, diastolic, pulse || null, context || [], notes || '', medicationTaken || false, recordedAt || new Date().toISOString()]
+      `INSERT INTO bp_entries (user_id, systolic, diastolic, pulse, session, context, notes, medication_taken, recorded_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [req.userId, systolic, diastolic, pulse || null, session || 'morning', context || [], notes || '', medicationTaken || false, recordedAt || new Date().toISOString()]
     );
     
     await logAudit(req.userId, 'BP_ENTRY_CREATED', 'bp_entry', result.rows[0].id, { systolic, diastolic }, req);
@@ -434,10 +537,7 @@ app.post('/api/bp', authMiddleware, checkPasswordReset, async (req, res) => {
 
 app.delete('/api/bp/:id', authMiddleware, checkPasswordReset, async (req, res) => {
   try {
-    await query(
-      'DELETE FROM bp_entries WHERE id = $1 AND user_id = $2',
-      [req.params.id, req.userId]
-    );
+    await query('DELETE FROM bp_entries WHERE id = $1 AND user_id = $2', [req.params.id, req.userId]);
     await logAudit(req.userId, 'BP_ENTRY_DELETED', 'bp_entry', req.params.id, {}, req);
     res.json({ success: true });
   } catch (err) {
@@ -446,17 +546,167 @@ app.delete('/api/bp/:id', authMiddleware, checkPasswordReset, async (req, res) =
   }
 });
 
-// ─── Weight Entries ───────────────────────────────────────────
-app.get('/api/weight', authMiddleware, checkPasswordReset, async (req, res) => {
+// ═══════════════════════════════════════════════════════════════
+// ─── Mood Entries ─────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+app.get('/api/mood', authMiddleware, checkPasswordReset, async (req, res) => {
   try {
+    const { limit = 100, offset = 0 } = req.query;
     const result = await query(
-      `SELECT id, weight, notes, recorded_at, created_at
-       FROM weight_entries WHERE user_id = $1 ORDER BY recorded_at DESC LIMIT 100`,
-      [req.userId]
+      `SELECT * FROM mood_entries WHERE user_id = $1 ORDER BY recorded_at DESC LIMIT $2 OFFSET $3`,
+      [req.userId, parseInt(limit), parseInt(offset)]
     );
     res.json(result.rows);
   } catch (err) {
-    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch mood entries' });
+  }
+});
+
+app.post('/api/mood', authMiddleware, checkPasswordReset, async (req, res) => {
+  try {
+    const { mood, dayRating, sleepQuality, energyLevel, notes, recordedAt } = req.body;
+    
+    if (!mood) {
+      return res.status(400).json({ error: 'Mood is required' });
+    }
+    
+    const validMoods = ['good', 'stressed', 'calm', 'anxious', 'sad', 'energized'];
+    if (!validMoods.includes(mood.toLowerCase())) {
+      return res.status(400).json({ error: 'Invalid mood value' });
+    }
+    
+    const result = await query(
+      `INSERT INTO mood_entries (user_id, mood, day_rating, sleep_quality, energy_level, notes, recorded_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [req.userId, mood.toLowerCase(), dayRating || null, sleepQuality || null, energyLevel || null, notes || '', recordedAt || new Date().toISOString()]
+    );
+    
+    await logAudit(req.userId, 'MOOD_ENTRY_CREATED', 'mood_entry', result.rows[0].id, { mood }, req);
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save mood entry' });
+  }
+});
+
+app.delete('/api/mood/:id', authMiddleware, checkPasswordReset, async (req, res) => {
+  try {
+    await query('DELETE FROM mood_entries WHERE id = $1 AND user_id = $2', [req.params.id, req.userId]);
+    await logAudit(req.userId, 'MOOD_ENTRY_DELETED', 'mood_entry', req.params.id, {}, req);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete mood entry' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ─── Water Entries ────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+app.get('/api/water', authMiddleware, checkPasswordReset, async (req, res) => {
+  try {
+    const { limit = 100, offset = 0 } = req.query;
+    const result = await query(
+      `SELECT * FROM water_entries WHERE user_id = $1 ORDER BY recorded_at DESC LIMIT $2 OFFSET $3`,
+      [req.userId, parseInt(limit), parseInt(offset)]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch water entries' });
+  }
+});
+
+app.post('/api/water', authMiddleware, checkPasswordReset, async (req, res) => {
+  try {
+    const { amount, unit, recordedAt } = req.body;
+    
+    if (!amount) {
+      return res.status(400).json({ error: 'Amount is required' });
+    }
+    
+    const result = await query(
+      `INSERT INTO water_entries (user_id, amount, unit, recorded_at)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [req.userId, amount, unit || 'ml', recordedAt || new Date().toISOString()]
+    );
+    
+    await logAudit(req.userId, 'WATER_ENTRY_CREATED', 'water_entry', result.rows[0].id, { amount }, req);
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save water entry' });
+  }
+});
+
+app.delete('/api/water/:id', authMiddleware, checkPasswordReset, async (req, res) => {
+  try {
+    await query('DELETE FROM water_entries WHERE id = $1 AND user_id = $2', [req.params.id, req.userId]);
+    await logAudit(req.userId, 'WATER_ENTRY_DELETED', 'water_entry', req.params.id, {}, req);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete water entry' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ─── Steps Entries ────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+app.get('/api/steps', authMiddleware, checkPasswordReset, async (req, res) => {
+  try {
+    const { limit = 100, offset = 0 } = req.query;
+    const result = await query(
+      `SELECT * FROM steps_entries WHERE user_id = $1 ORDER BY recorded_at DESC LIMIT $2 OFFSET $3`,
+      [req.userId, parseInt(limit), parseInt(offset)]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch steps entries' });
+  }
+});
+
+app.post('/api/steps', authMiddleware, checkPasswordReset, async (req, res) => {
+  try {
+    const { steps, recordedAt } = req.body;
+    
+    if (!steps && steps !== 0) {
+      return res.status(400).json({ error: 'Steps is required' });
+    }
+    
+    const result = await query(
+      `INSERT INTO steps_entries (user_id, steps, recorded_at)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [req.userId, parseInt(steps), recordedAt || new Date().toISOString()]
+    );
+    
+    await logAudit(req.userId, 'STEPS_ENTRY_CREATED', 'steps_entry', result.rows[0].id, { steps }, req);
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save steps entry' });
+  }
+});
+
+app.delete('/api/steps/:id', authMiddleware, checkPasswordReset, async (req, res) => {
+  try {
+    await query('DELETE FROM steps_entries WHERE id = $1 AND user_id = $2', [req.params.id, req.userId]);
+    await logAudit(req.userId, 'STEPS_ENTRY_DELETED', 'steps_entry', req.params.id, {}, req);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete steps entry' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ─── Weight Entries ────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+app.get('/api/weight', authMiddleware, checkPasswordReset, async (req, res) => {
+  try {
+    const { limit = 100, offset = 0 } = req.query;
+    const result = await query(
+      `SELECT * FROM weight_entries WHERE user_id = $1 ORDER BY recorded_at DESC LIMIT $2 OFFSET $3`,
+      [req.userId, parseInt(limit), parseInt(offset)]
+    );
+    res.json(result.rows);
+  } catch (err) {
     res.status(500).json({ error: 'Failed to fetch weight entries' });
   }
 });
@@ -472,95 +722,136 @@ app.post('/api/weight', authMiddleware, checkPasswordReset, async (req, res) => 
     const result = await query(
       `INSERT INTO weight_entries (user_id, weight, notes, recorded_at)
        VALUES ($1, $2, $3, $4)
-       RETURNING id, weight, notes, recorded_at, created_at`,
+       RETURNING *`,
       [req.userId, weight, notes || '', recordedAt || new Date().toISOString()]
     );
     
     await logAudit(req.userId, 'WEIGHT_ENTRY_CREATED', 'weight_entry', result.rows[0].id, { weight }, req);
     res.json(result.rows[0]);
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: 'Failed to save weight entry' });
   }
 });
 
 app.delete('/api/weight/:id', authMiddleware, checkPasswordReset, async (req, res) => {
   try {
-    await query(
-      'DELETE FROM weight_entries WHERE id = $1 AND user_id = $2',
-      [req.params.id, req.userId]
-    );
+    await query('DELETE FROM weight_entries WHERE id = $1 AND user_id = $2', [req.params.id, req.userId]);
     await logAudit(req.userId, 'WEIGHT_ENTRY_DELETED', 'weight_entry', req.params.id, {}, req);
     res.json({ success: true });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: 'Failed to delete weight entry' });
   }
 });
 
-// ─── Settings ──────────────────────────────────────────────────
-app.get('/api/settings', authMiddleware, checkPasswordReset, async (req, res) => {
+// ═══════════════════════════════════════════════════════════════
+// ─── Pregnancy Profile ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+app.get('/api/pregnancy', authMiddleware, checkPasswordReset, async (req, res) => {
   try {
     const result = await query(
-      'SELECT weight_unit, bp_unit, theme FROM user_settings WHERE user_id = $1',
+      'SELECT * FROM pregnancy_profiles WHERE user_id = $1',
       [req.userId]
     );
     if (result.rows.length === 0) {
-      return res.json({ weightUnit: 'kg', bpUnit: 'mmHg', theme: 'light' });
+      return res.json(null);
     }
-    const s = result.rows[0];
-    res.json({ weightUnit: s.weight_unit, bpUnit: s.bp_unit, theme: s.theme });
+    res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch settings' });
+    res.status(500).json({ error: 'Failed to fetch pregnancy profile' });
   }
 });
 
-app.post('/api/settings', authMiddleware, checkPasswordReset, async (req, res) => {
+app.post('/api/pregnancy', authMiddleware, checkPasswordReset, async (req, res) => {
   try {
-    const { weightUnit, bpUnit, theme } = req.body;
-    await query(
-      `INSERT INTO user_settings (user_id, weight_unit, bp_unit, theme)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (user_id) DO UPDATE SET
-       weight_unit = EXCLUDED.weight_unit,
-       bp_unit = EXCLUDED.bp_unit,
-       theme = EXCLUDED.theme,
-       updated_at = CURRENT_TIMESTAMP`,
-      [req.userId, weightUnit || 'kg', bpUnit || 'mmHg', theme || 'light']
+    const { lastPeriodDate, dueDate } = req.body;
+    
+    if (!lastPeriodDate) {
+      return res.status(400).json({ error: 'Last period date is required' });
+    }
+    
+    const result = await query(
+      `INSERT INTO pregnancy_profiles (user_id, last_period_date, due_date)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id) DO UPDATE SET last_period_date = $2, due_date = $3, updated_at = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [req.userId, lastPeriodDate, dueDate || null]
     );
+    
+    await logAudit(req.userId, 'PREGNANCY_PROFILE_CREATED', 'pregnancy_profile', result.rows[0].id, { lastPeriodDate, dueDate }, req);
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save pregnancy profile' });
+  }
+});
+
+app.delete('/api/pregnancy', authMiddleware, checkPasswordReset, async (req, res) => {
+  try {
+    await query('DELETE FROM pregnancy_profiles WHERE user_id = $1', [req.userId]);
+    await logAudit(req.userId, 'PREGNANCY_PROFILE_DELETED', 'pregnancy_profile', null, {}, req);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to save settings' });
+    res.status(500).json({ error: 'Failed to delete pregnancy profile' });
   }
 });
 
-// ─── Stats ─────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// ─── Stats Dashboard ───────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
 app.get('/api/stats', authMiddleware, checkPasswordReset, async (req, res) => {
   try {
+    const { days = 7 } = req.query;
+    
     const bpResult = await query(
       `SELECT COUNT(*) as total, 
        AVG(systolic)::INTEGER as avg_systolic, 
        AVG(diastolic)::INTEGER as avg_diastolic,
        MAX(recorded_at) as last_recorded
-       FROM bp_entries WHERE user_id = $1`,
+       FROM bp_entries WHERE user_id = $1 AND recorded_at > NOW() - INTERVAL '${parseInt(days)} days'`,
       [req.userId]
     );
+    
     const weightResult = await query(
       `SELECT COUNT(*) as total,
        AVG(weight)::DECIMAL(5,2) as avg_weight,
        MAX(recorded_at) as last_recorded
-       FROM weight_entries WHERE user_id = $1`,
+       FROM weight_entries WHERE user_id = $1 AND recorded_at > NOW() - INTERVAL '${parseInt(days)} days'`,
       [req.userId]
     );
+    
+    const moodResult = await query(
+      `SELECT COUNT(*) as total,
+       MAX(recorded_at) as last_recorded
+       FROM mood_entries WHERE user_id = $1 AND recorded_at > NOW() - INTERVAL '${parseInt(days)} days'`,
+      [req.userId]
+    );
+    
+    const waterResult = await query(
+      `SELECT COALESCE(SUM(amount), 0) as total,
+       MAX(recorded_at) as last_recorded
+       FROM water_entries WHERE user_id = $1 AND recorded_at > NOW() - INTERVAL '${parseInt(days)} days'`,
+      [req.userId]
+    );
+    
+    const stepsResult = await query(
+      `SELECT COALESCE(SUM(steps), 0) as total,
+       MAX(recorded_at) as last_recorded
+       FROM steps_entries WHERE user_id = $1 AND recorded_at > NOW() - INTERVAL '${parseInt(days)} days'`,
+      [req.userId]
+    );
+    
     res.json({
       bp: bpResult.rows[0],
-      weight: weightResult.rows[0]
+      weight: weightResult.rows[0],
+      mood: moodResult.rows[0],
+      water: waterResult.rows[0],
+      steps: stepsResult.rows[0]
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch stats' });
   }
 });
 
+// ─── Start Server ──────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`BP Tracker API running on port ${PORT}`);
+  console.log(`Health Companion API running on port ${PORT}`);
 });
