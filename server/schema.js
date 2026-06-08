@@ -1,13 +1,7 @@
-import pg from 'pg';
-const { Pool } = pg;
+// Database schema initialization
+// Uses the shared pool from db.js
 
-const pool = new Pool({
-  host: process.env.PG_HOST || '76.13.219.191',
-  port: parseInt(process.env.PG_PORT || '32773'),
-  user: process.env.PG_USER || 'ckEboseeAziv0PsC',
-  password: process.env.PG_PASSWORD || 'mQKydj5cyP4oJeSwiTBZ0Kb7r53HFaZI',
-  database: process.env.PG_DATABASE || 'healthapp'
-});
+import pool from './db.js';
 
 const schema = `
 -- Drop existing tables for clean migration (comment out in production)
@@ -171,7 +165,7 @@ CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
 CREATE INDEX idx_audit_logs_action ON audit_logs(action);
 `;
 
-async function init() {
+async function initSchema() {
   const client = await pool.connect();
   try {
     console.log('Initializing unified schema...');
@@ -182,8 +176,9 @@ async function init() {
     throw err;
   } finally {
     client.release();
-    await pool.end();
   }
 }
 
-init().catch(console.error);
+initSchema().catch(console.error);
+
+export { initSchema };
