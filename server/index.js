@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
 import { query, getClient } from './db.js';
+import './schema.js'; // Initialize database schema on startup
 
 const app = express();
 const PORT = process.env.PORT || 38257;
